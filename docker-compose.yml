@@ -1,0 +1,84 @@
+services:
+  # ==========================================
+  # Cowrie SSH/Telnet Honeypot
+  # ==========================================
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: cowrie-honeypot
+    restart: unless-stopped
+    ports:
+      - "2222:2222"
+      - "2223:2223"
+    volumes:
+      - cowrie-var:/cowrie/cowrie-git/var
+      - cowrie-etc:/cowrie/cowrie-git/etc
+    networks:
+      - athena-net
+
+  # ==========================================
+  # Elasticsearch (Storage & Search Engine)
+  # ==========================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.2
+    container_name: athena-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms768m -Xmx768m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - athena-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ==========================================
+  # Kibana (Visualization & SOC Dashboard)
+  # ==========================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.2
+    container_name: athena-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - athena-net
+
+  # ==========================================
+  # Filebeat (Lightweight Log Shipper)
+  # ==========================================
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.17.2
+    container_name: athena-filebeat
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    restart: unless-stopped
+    volumes:
+      - ./config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - cowrie-var:/var/log/cowrie:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - athena-net
+
+volumes:
+  cowrie-var:
+  cowrie-etc:
+  es-data:
+
+networks:
+  athena-net:
+    driver: bridge

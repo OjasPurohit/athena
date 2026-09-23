@@ -61,15 +61,16 @@ Kibana Dashboard (visualization + alerts)
 - **Hardware:** Any machine running Docker — min. 8GB RAM, 4-core CPU recommended. No dedicated homelab box required to start; a laptop/desktop with Docker Desktop is sufficient. (Team lead already runs a homelab with Docker experience — Jellyfin media server on a NixOS box — so migrating here later is an option, not a blocker.)
 - **ML Algorithm:** Isolation Forest, trained on baseline (non-attack) session features: login attempts/minute, unique usernames tried, session duration, command count. A lightweight rule-based pre-filter (failed-login-rate threshold) runs before ML scoring to cut noise.
 
-## 6. 5-Week Timeline
+## 6. 5-Week Timeline & Status
 
-| Week | Goal | Milestone |
-|---|---|---|
-| **1** | Docker set up, repo created, Cowrie honeypot running and logging | Cowrie logs a real SSH login attempt to file |
-| **2** | Filebeat → Elasticsearch → Kibana pipeline working | Kibana shows live honeypot activity |
-| **3** | Collect baseline traffic, train Isolation Forest, build scoring script | Model correctly flags a simulated brute-force as anomalous |
-| **4** | Wire anomaly scores into Kibana, stress-test with Hydra attacks | Full pipeline: attack in → alert out, on dashboard, with measured latency |
-| **5** | Rehearse live demo, write docs, viva prep | Polished, submittable project; every team member can explain every component |
+| Week / Stage | Goal | Milestone | Status & Completed Date |
+|---|---|---|---|
+| **Week 1 (Stage 1)** | Docker set up, repo created, Cowrie honeypot running and logging | Cowrie logs a real SSH login attempt to file | **DONE** (Aug 29, 2026) — Verified real SSH connection logging |
+| **Week 2 (Stage 1)** | Filebeat → Elasticsearch → Kibana pipeline working | Kibana shows live honeypot activity & data views | **DONE** (Aug 30, 2026) — Filebeat streaming NDJSON logs to Elasticsearch `cowrie-logs-*` |
+| **Week 3 (Stage 2)** | Collect baseline traffic, train Isolation Forest, build scoring script | Model correctly flags a simulated brute-force as anomalous | **DONE** (Aug 30, 2026) — Dual-tier Rule Pre-filter + Isolation Forest operational |
+| **Week 4 (Stage 3 & 4)** | Wire anomaly scores into Kibana, stress-test with Hydra attacks | Full pipeline: attack in → alert out, on dashboard, with measured latency | **DONE** (Aug 30, 2026) — E2E validation passed (~9.09s latency), Kibana SOC Dashboard wired |
+| **Stage 5 (Frontend Centerpiece)** | Custom real-time SOC dashboard (FastAPI + React + Tailwind + Framer Motion) | Real-time WebSocket terminal UI, radial anomaly arc gauge, live event feed | **DONE** (Sep 01, 2026) — FastAPI backend (`/ws/live`, REST) + React dashboard in private banking / Bloomberg terminal aesthetic |
+| **Week 5** | Rehearse live demo, write docs, viva prep | Polished, submittable project; every team member can explain every component | **READY FOR VIVA** — README documentation & viva cheat sheet completed |
 
 ## 7. Project Synopsis Status
 
