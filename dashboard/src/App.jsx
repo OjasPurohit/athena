@@ -14,7 +14,7 @@ const API_BASE = "http://localhost:8000";
 export default function App() {
   const [state, dispatch] = useReducer(socReducer, initialState);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [simStatus, setSimStatus] = useState(null); // null | "brute-force" | "spray" | "benign"
+  const [simStatus, setSimStatus] = useState(null);
 
   useApiData(dispatch);
   useWebSocket(dispatch);
@@ -25,7 +25,7 @@ export default function App() {
   }, []);
 
   const formatUtc = (date) => {
-    return date.toISOString().replace("T", " ").substring(0, 19) + " UTC";
+    return date.toISOString().replace("T", " ").substring(11, 19) + " UTC";
   };
 
   const runSimulation = async (mode) => {
@@ -33,7 +33,6 @@ export default function App() {
     setSimStatus(mode);
     try {
       await fetch(`${API_BASE}/api/simulate/${mode}`, { method: "POST" });
-      // Immediately fetch updated snapshot in case WS is reconnecting
       const [statsRes, sessionsRes, alertsRes, feedRes] = await Promise.all([
         fetch(`${API_BASE}/api/stats`),
         fetch(`${API_BASE}/api/sessions`),
@@ -58,31 +57,7 @@ export default function App() {
     }
   };
 
-  const getStatusBadge = () => {
-    switch (state.connectionStatus) {
-      case "connected":
-        return (
-          <span className="inline-flex items-center text-[10px] font-mono text-emerald-light bg-emerald-dim/40 border border-emerald/40 px-2.5 py-1">
-            <span className="w-1.5 h-1.5 bg-emerald-light mr-1.5 rounded-none athena-breathe" />
-            LIVE LINK // 2s SYNC
-          </span>
-        );
-      case "connecting":
-        return (
-          <span className="inline-flex items-center text-[10px] font-mono text-brass-light bg-brass-dim/40 border border-brass/40 px-2.5 py-1">
-            <span className="w-1.5 h-1.5 bg-brass-light mr-1.5 rounded-none athena-breathe" />
-            CONNECTING...
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center text-[10px] font-mono text-carmine-light bg-carmine-dim/40 border border-carmine/40 px-2.5 py-1">
-            <span className="w-1.5 h-1.5 bg-carmine-light mr-1.5 rounded-none" />
-            DISCONNECTED // RETRYING
-          </span>
-        );
-    }
-  };
+  const isConnected = state.connectionStatus === "connected";
 
   const latestSession =
     state.stats.latest_session ||
@@ -97,89 +72,87 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-canvas text-ivory flex flex-col selection:bg-brass-dim selection:text-ivory">
-      {/* Top Command Header */}
-      <header className="border-b border-brass-dark bg-surface px-6 py-3 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center space-x-3.5">
-          <div className="w-2.5 h-2.5 bg-brass rounded-none rotate-45" />
-          <div>
-            <div className="flex items-baseline space-x-3">
-              <h1 className="font-serif text-2xl font-semibold tracking-wider text-ivory leading-none">
-                PROJECT ATHENA
-              </h1>
-              <span className="text-[11px] font-mono text-slate-text tracking-terminal uppercase">
-                · SECURITY OPERATIONS CENTRE
-              </span>
-            </div>
-            <p className="text-[10px] font-sans text-slate-muted tracking-widest uppercase mt-0.5">
-              COWRIE SSH HONEYPOT &amp; HYBRID ISOLATION FOREST ANOMALY DETECTION
-            </p>
-          </div>
+      {/* Header */}
+      <header className="border-b border-border-subtle bg-surface px-6 h-13 flex items-center justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <span className="font-serif text-lg font-medium tracking-wide text-ivory">
+            ATHENA
+          </span>
+          <span className="text-border-accent">/</span>
+          <span className="text-xs text-slate-text">
+            SSH Honeypot &amp; Anomaly Detection
+          </span>
+          <span className="hidden md:inline-block text-[11px] font-mono text-slate-muted bg-canvas border border-border-subtle px-2 py-0.5">
+            cowrie:2222
+          </span>
         </div>
 
-        {/* Interactive Demo Simulation Controls + Live Clock */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center space-x-2 border-r border-border-subtle pr-4">
-            <span className="text-[10px] font-mono text-slate-muted uppercase tracking-wider mr-1 hidden xl:inline">
-              LIVE DEMO:
+        <div className="flex items-center space-x-5">
+          {/* Discreet Traffic Injection Segmented Control */}
+          <div className="flex items-center space-x-2">
+            <span className="text-[11px] text-slate-muted hidden lg:inline">
+              Simulate:
             </span>
+            <div className="inline-flex border border-border-subtle bg-canvas divide-x divide-border-subtle text-xs font-mono">
+              <button
+                onClick={() => runSimulation("brute-force")}
+                disabled={!!simStatus}
+                className={`px-3 py-1 transition-colors cursor-pointer ${
+                  simStatus === "brute-force"
+                    ? "bg-surface-elevated text-ivory"
+                    : "text-ivory-dim hover:text-ivory hover:bg-surface-hover"
+                } disabled:opacity-50`}
+              >
+                {simStatus === "brute-force" ? "Running..." : "Brute-Force"}
+              </button>
 
-            <button
-              onClick={() => runSimulation("brute-force")}
-              disabled={!!simStatus}
-              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider border transition-all cursor-pointer ${
-                simStatus === "brute-force"
-                  ? "bg-carmine text-ivory border-carmine-light animate-pulse"
-                  : "bg-carmine-dim/40 text-carmine-light border-carmine/50 hover:bg-carmine-dim/80"
-              } disabled:opacity-50`}
-            >
-              {simStatus === "brute-force"
-                ? "⚡ Running Brute-Force..."
-                : "⚡ Brute-Force Attack"}
-            </button>
+              <button
+                onClick={() => runSimulation("spray")}
+                disabled={!!simStatus}
+                className={`px-3 py-1 transition-colors cursor-pointer ${
+                  simStatus === "spray"
+                    ? "bg-surface-elevated text-ivory"
+                    : "text-ivory-dim hover:text-ivory hover:bg-surface-hover"
+                } disabled:opacity-50`}
+              >
+                {simStatus === "spray" ? "Running..." : "Credential Spray"}
+              </button>
 
-            <button
-              onClick={() => runSimulation("spray")}
-              disabled={!!simStatus}
-              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider border transition-all cursor-pointer ${
-                simStatus === "spray"
-                  ? "bg-amber text-canvas border-amber animate-pulse"
-                  : "bg-amber-dim/40 text-amber border-amber/50 hover:bg-amber-dim/80"
-              } disabled:opacity-50`}
-            >
-              {simStatus === "spray"
-                ? "🎯 Running Spray..."
-                : "🎯 Credential Spray"}
-            </button>
-
-            <button
-              onClick={() => runSimulation("benign")}
-              disabled={!!simStatus}
-              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider border transition-all cursor-pointer ${
-                simStatus === "benign"
-                  ? "bg-emerald text-ivory border-emerald-light animate-pulse"
-                  : "bg-emerald-dim/40 text-emerald-light border-emerald/50 hover:bg-emerald-dim/80"
-              } disabled:opacity-50`}
-            >
-              {simStatus === "benign"
-                ? "✓ Running Benign Admin..."
-                : "✓ Benign Admin"}
-            </button>
+              <button
+                onClick={() => runSimulation("benign")}
+                disabled={!!simStatus}
+                className={`px-3 py-1 transition-colors cursor-pointer ${
+                  simStatus === "benign"
+                    ? "bg-surface-elevated text-ivory"
+                    : "text-ivory-dim hover:text-ivory hover:bg-surface-hover"
+                } disabled:opacity-50`}
+              >
+                {simStatus === "benign" ? "Running..." : "Benign Session"}
+              </button>
+            </div>
           </div>
 
-          <div className="text-right font-mono text-[11px] hidden sm:block">
-            <div className="text-ivory-dim tracking-wider tabular-nums">
+          <div className="h-4 w-[1px] bg-border-subtle hidden sm:block" />
+
+          <div className="flex items-center space-x-4 text-xs font-mono">
+            <span className="text-slate-text tabular-nums hidden sm:inline">
               {formatUtc(currentTime)}
-            </div>
-            <div className="text-[9px] text-slate-muted uppercase tracking-widest">
-              SYSTEM CLOCK
-            </div>
+            </span>
+            <span className="inline-flex items-center text-ivory-dim">
+              <span
+                className={`w-1.5 h-1.5 mr-2 ${
+                  isConnected
+                    ? "bg-emerald-light athena-breathe"
+                    : "bg-carmine-light"
+                }`}
+              />
+              {isConnected ? "Connected" : "Reconnecting"}
+            </span>
           </div>
-
-          <div>{getStatusBadge()}</div>
         </div>
       </header>
 
-      {/* Main Single-Screen Dashboard Grid */}
+      {/* Main Content */}
       <main className="flex-1 p-5 space-y-4 max-w-[1800px] w-full mx-auto">
         <StatsBar
           stats={state.stats}
@@ -187,45 +160,43 @@ export default function App() {
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* Left Column: Live Telemetry Feed + Score Timeline */}
           <div className="lg:col-span-7 flex flex-col space-y-4">
             <Panel
-              title="LIVE HONEYPOT TELEMETRY"
-              subtitle="REAL-TIME SSH AUTHENTICATION &amp; COMMAND LOGS (PORT 2222)"
+              title="Honeypot Telemetry"
+              subtitle="Live events from Cowrie SSH daemon"
               badge={
-                <span className="text-[10px] font-mono text-slate-muted uppercase">
-                  {state.feed.length} RECENT EVENTS
+                <span className="text-[11px] font-mono text-slate-muted">
+                  {state.feed.length} events
                 </span>
               }
-              className="h-[370px] athena-scanline"
+              className="h-[370px]"
             >
               <LiveFeed events={state.feed} />
             </Panel>
 
             <Panel
-              title="ML ANOMALY SCORE TIMELINE"
-              subtitle="CHRONOLOGICAL SESSION SCORES (GREEN = SAFE, RED = THREAT)"
+              title="Anomaly Score Trajectory"
+              subtitle="Isolation Forest scores across sessions"
               badge={
-                <span className="text-[10px] font-mono text-amber uppercase">
-                  DECISION THRESHOLD = 0.50
+                <span className="text-[11px] font-mono text-slate-muted">
+                  threshold 0.50
                 </span>
               }
-              className="h-[250px]"
+              className="h-[245px]"
             >
               <TimelineChart sessions={state.sessions} />
             </Panel>
           </div>
 
-          {/* Right Column: ML Threat Detector Gauge + Detected Alerts */}
           <div className="lg:col-span-5 flex flex-col space-y-4">
             <Panel
-              title="ML THREAT DETECTOR"
-              subtitle="LATEST SESSION SCORE &amp; 4-FEATURE VECTOR"
+              title="Session Threat Evaluation"
+              subtitle="Real-time ML inference &amp; feature vector"
               badge={
-                <span className="text-[10px] font-mono text-brass-light uppercase">
+                <span className="text-[11px] font-mono text-slate-muted">
                   {latestSession
-                    ? `SESSION #${latestSession.session_id?.slice(0, 8)}`
-                    : "ISOLATION FOREST"}
+                    ? `session ${latestSession.session_id?.slice(0, 8)}`
+                    : "isolation-forest"}
                 </span>
               }
               className="h-[370px]"
@@ -234,14 +205,14 @@ export default function App() {
             </Panel>
 
             <Panel
-              title="DETECTED SECURITY ALERTS"
-              subtitle="FLAGGED BRUTE-FORCE, CREDENTIAL SPRAY &amp; ML ANOMALIES"
+              title="Flagged Incidents"
+              subtitle="Escalated brute-force, spray &amp; outlier sessions"
               badge={
-                <span className="text-[10px] font-mono text-carmine-light uppercase">
-                  {state.alerts.length} ACTIVE ALERTS
+                <span className="text-[11px] font-mono text-slate-muted">
+                  {state.alerts.length} recorded
                 </span>
               }
-              className="h-[250px]"
+              className="h-[245px]"
             >
               <AlertStream alerts={state.alerts} />
             </Panel>
@@ -250,19 +221,15 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border-subtle border-l-2 border-l-brass-dark bg-surface px-6 py-2.5 flex flex-wrap items-center justify-between text-[11px] font-mono text-slate-muted">
-        <div className="flex items-center space-x-4">
-          <span>COWRIE SSH HONEYPOT</span>
-          <span>•</span>
-          <span>FILEBEAT + ELASTICSEARCH 8.17</span>
-          <span>•</span>
-          <span>SCIKIT-LEARN ISOLATION FOREST</span>
-          <span>•</span>
-          <span>FASTAPI WEBSOCKET ENGINE</span>
+      <footer className="border-t border-border-subtle bg-surface px-6 py-2.5 flex items-center justify-between text-[11px] font-mono text-slate-muted">
+        <div className="flex items-center space-x-3">
+          <span>Cowrie 2.6</span>
+          <span>·</span>
+          <span>Elasticsearch 8.17</span>
+          <span>·</span>
+          <span>Scikit-Learn Isolation Forest</span>
         </div>
-        <div className="text-slate-dim uppercase tracking-widest text-[10px]">
-          TEAM ATHENA · GROUP 4 · VIT IT
-        </div>
+        <div>Athena SOC · Group 4</div>
       </footer>
     </div>
   );

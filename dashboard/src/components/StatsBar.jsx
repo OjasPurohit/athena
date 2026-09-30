@@ -1,5 +1,4 @@
 import React from "react";
-import { motion } from "framer-motion";
 
 export function StatsBar({ stats }) {
   const latestScore = Number(
@@ -15,84 +14,65 @@ export function StatsBar({ stats }) {
 
   const metrics = [
     {
-      label: "HONEYPOT EVENTS",
-      sublabel: "Raw SSH logs captured",
+      label: "Ingested Events",
+      meta: "Cowrie SSH telemetry",
       value: (stats.total_raw_events || 0).toLocaleString(),
-      suffix: "",
-      tone: "text-ivory",
-      border: "",
+      valueClass: "text-ivory",
     },
     {
-      label: "SESSIONS ANALYZED",
-      sublabel: `${benignCount} Benign · ${totalAlerts} Threats`,
+      label: "Evaluated Sessions",
+      meta: `${benignCount} normal · ${totalAlerts} flagged`,
       value: totalSessions.toLocaleString(),
-      suffix: "",
-      tone: "text-ivory",
-      border: "",
+      valueClass: "text-ivory",
     },
     {
-      label: "THREATS DETECTED",
-      sublabel: "Brute-Force, Spray & ML Outliers",
+      label: "Security Incidents",
+      meta: "Rule pre-filter & ML outliers",
       value: totalAlerts.toLocaleString(),
-      suffix: "",
-      tone: totalAlerts > 0 ? "text-carmine-light" : "text-ivory",
-      border: totalAlerts > 0 ? "border-l-2 border-l-carmine" : "",
+      valueClass: totalAlerts > 0 ? "text-carmine-light" : "text-ivory",
     },
     {
-      label: "LATEST SESSION SCORE",
-      sublabel: isLatestThreat
-        ? "THREAT DETECTED (≥ 0.50)"
-        : "NORMAL BASELINE (< 0.50)",
+      label: "Latest Session Score",
+      meta: isLatestThreat ? "Threshold exceeded (≥ 0.50)" : "Within normal baseline (< 0.50)",
       value: latestScore.toFixed(3),
-      suffix: isLatestThreat ? "THREAT" : "SAFE",
-      badgeClass: isLatestThreat
-        ? "bg-carmine-dim/60 text-carmine-light border border-carmine/50"
-        : "bg-emerald-dim/60 text-emerald-light border border-emerald/50",
-      tone: isLatestThreat ? "text-brass-light" : "text-emerald-light",
-      border: isLatestThreat
-        ? "border-l-2 border-l-amber"
-        : "border-l-2 border-l-emerald",
+      valueClass: isLatestThreat ? "text-carmine-light" : "text-emerald-light",
+      statusDot: isLatestThreat ? "bg-carmine-light" : "bg-emerald-light",
+      statusLabel: isLatestThreat ? "Anomaly" : "Nominal",
     },
   ];
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="grid grid-cols-2 lg:grid-cols-4 border border-border-subtle bg-surface divide-y lg:divide-y-0 lg:divide-x divide-border-subtle"
-    >
+    <div className="grid grid-cols-2 lg:grid-cols-4 border border-border-subtle bg-surface divide-y lg:divide-y-0 lg:divide-x divide-border-subtle">
       {metrics.map((item, idx) => (
         <div
           key={idx}
-          className={`px-5 py-3.5 flex flex-col justify-between relative hover:bg-surface-hover/40 transition-colors duration-200 ${item.border}`}
+          className="px-5 py-3.5 flex flex-col justify-between hover:bg-surface-hover/30 transition-colors"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono tracking-wider text-slate-text uppercase">
+            <span className="text-xs text-slate-text font-medium">
               {item.label}
             </span>
-            {item.suffix && (
-              <span
-                className={`text-[10px] font-mono px-1.5 py-0.5 uppercase tracking-wider ${item.badgeClass}`}
-              >
-                {item.suffix}
+            {item.statusLabel && (
+              <span className="inline-flex items-center text-[11px] font-mono text-ivory-dim">
+                <span className={`w-1.5 h-1.5 mr-1.5 ${item.statusDot}`} />
+                {item.statusLabel}
               </span>
             )}
           </div>
 
-          <div className="my-1 flex items-baseline space-x-2">
+          <div className="my-1 flex items-baseline">
             <span
-              className={`text-2xl font-mono font-semibold tracking-tight tabular-nums ${item.tone}`}
+              className={`text-2xl font-mono font-medium tracking-tight tabular-nums ${item.valueClass}`}
             >
               {item.value}
             </span>
           </div>
 
-          <div className="text-[11px] font-sans text-slate-muted truncate">
-            {item.sublabel}
+          <div className="text-[11px] text-slate-muted truncate">
+            {item.meta}
           </div>
         </div>
       ))}
-    </motion.div>
+    </div>
   );
 }

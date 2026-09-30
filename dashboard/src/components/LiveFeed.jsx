@@ -1,14 +1,10 @@
 import React from "react";
-import { motion, AnimatePresence } from "framer-motion";
 
 export function LiveFeed({ events = [] }) {
   if (!events || events.length === 0) {
     return (
       <div className="h-56 flex flex-col items-center justify-center text-slate-muted font-mono text-xs">
-        <span>WAITING FOR HONEYPOT TELEMETRY...</span>
-        <span className="text-[10px] mt-1 text-slate-dim">
-          Click a simulation button above or connect to SSH port 2222
-        </span>
+        <span>No honeypot events recorded yet</span>
       </div>
     );
   }
@@ -26,42 +22,49 @@ export function LiveFeed({ events = [] }) {
   function getEventConfig(eventid) {
     if (eventid?.includes("login.failed")) {
       return {
-        label: "✗ AUTH FAIL",
-        badge: "text-carmine-light bg-carmine-dim/40 border-carmine/40",
-        rowBorder: "border-l-2 border-l-carmine",
+        label: "AUTH_FAIL",
+        tone: "text-carmine-light",
+        dot: "bg-carmine-light",
       };
     }
     if (eventid?.includes("login.success")) {
       return {
-        label: "✓ LOGIN OK",
-        badge: "text-emerald-light bg-emerald-dim/40 border-emerald/40",
-        rowBorder: "border-l-2 border-l-emerald",
+        label: "AUTH_OK",
+        tone: "text-emerald-light",
+        dot: "bg-emerald-light",
       };
     }
     if (eventid?.includes("command.input") || eventid?.includes("command.failed")) {
       return {
-        label: "$ COMMAND",
-        badge: "text-brass-light bg-brass-dim/40 border-brass/40",
-        rowBorder: "border-l-2 border-l-brass",
+        label: "CMD_EXEC",
+        tone: "text-brass-light",
+        dot: "bg-brass-light",
       };
     }
     if (eventid?.includes("session.connect")) {
       return {
-        label: "→ CONNECT",
-        badge: "text-ivory-dim bg-surface-hover border-border-subtle",
-        rowBorder: "border-l-2 border-l-slate-muted",
+        label: "CONNECT",
+        tone: "text-ivory-dim",
+        dot: "bg-slate-text",
       };
     }
     return {
-      label: "← CLOSED",
-      badge: "text-slate-text bg-surface-hover border-border-subtle",
-      rowBorder: "border-l-2 border-l-transparent",
+      label: "DISCONNECT",
+      tone: "text-slate-muted",
+      dot: "bg-slate-dim",
     };
   }
 
   return (
-    <div className="flex-1 overflow-y-auto divide-y divide-border-subtle pr-1 font-mono text-xs">
-      <AnimatePresence initial={false}>
+    <div className="flex-1 flex flex-col overflow-hidden font-mono text-xs">
+      <div className="grid grid-cols-12 gap-2 pb-2 border-b border-border-subtle text-[10px] text-slate-muted uppercase tracking-wider px-2">
+        <div className="col-span-2">Time</div>
+        <div className="col-span-2">Event</div>
+        <div className="col-span-3">Source IP</div>
+        <div className="col-span-5">Payload / Detail</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto divide-y divide-border-subtle/60 pr-1">
         {events.map((evt, idx) => {
           const key = evt.timestamp
             ? `${evt.session || ""}-${evt.timestamp}-${evt.eventid}-${idx}`
@@ -70,37 +73,31 @@ export function LiveFeed({ events = [] }) {
           const isCmd = evt.eventid?.includes("command.");
 
           return (
-            <motion.div
+            <div
               key={key}
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className={`py-2 px-2.5 flex items-center space-x-3 hover:bg-surface-hover/50 transition-colors duration-200 ${cfg.rowBorder}`}
+              className="grid grid-cols-12 gap-2 py-2 px-2 items-center hover:bg-surface-hover/40 transition-colors"
             >
-              <span className="text-[11px] text-slate-muted whitespace-nowrap tabular-nums">
+              <div className="col-span-2 text-[11px] text-slate-muted tabular-nums">
                 {formatTime(evt.timestamp)}
-              </span>
+              </div>
 
-              <span
-                className={`text-[10px] w-24 text-center px-1.5 py-0.5 border whitespace-nowrap uppercase tracking-wider ${cfg.badge}`}
-              >
-                {cfg.label}
-              </span>
+              <div className="col-span-2 flex items-center space-x-1.5">
+                <span className={`w-1.5 h-1.5 shrink-0 ${cfg.dot}`} />
+                <span className={`text-[11px] ${cfg.tone}`}>{cfg.label}</span>
+              </div>
 
-              <span className="text-[11px] text-ivory-dim font-medium whitespace-nowrap tabular-nums">
+              <div className="col-span-3 text-[11px] text-ivory-dim tabular-nums">
                 {evt.src_ip || "172.18.0.1"}
-              </span>
+              </div>
 
-              <div className="flex-1 text-[11px] text-slate-text truncate">
+              <div className="col-span-5 text-[11px] text-slate-text truncate">
                 {evt.username ? (
                   <span>
-                    user: <strong className="text-ivory">{evt.username}</strong>
+                    <span className="text-ivory">{evt.username}</span>
                     {evt.password && (
-                      <span>
-                        {" "}
-                        · pass:{" "}
-                        <strong
+                      <span className="text-slate-muted">
+                        {" / "}
+                        <span
                           className={
                             evt.eventid?.includes("failed")
                               ? "text-carmine-light"
@@ -108,26 +105,26 @@ export function LiveFeed({ events = [] }) {
                           }
                         >
                           {evt.password}
-                        </strong>
+                        </span>
                       </span>
                     )}
                   </span>
                 ) : isCmd ? (
-                  <span className="text-brass-light font-medium">
+                  <span className="text-ivory">
                     {evt.message?.startsWith("CMD: ")
                       ? `$ ${evt.message.slice(5)}`
                       : evt.message}
                   </span>
                 ) : evt.message ? (
-                  <span className="text-slate-text">{evt.message}</span>
+                  <span className="text-slate-muted">{evt.message}</span>
                 ) : (
-                  <span>Session #{evt.session?.slice(0, 8) || "N/A"}</span>
+                  <span>session {evt.session?.slice(0, 8) || "N/A"}</span>
                 )}
               </div>
-            </motion.div>
+            </div>
           );
         })}
-      </AnimatePresence>
+      </div>
     </div>
   );
 }

@@ -4,8 +4,8 @@ import { motion } from "framer-motion";
 export function AnomalyGauge({ score = 0, latestSession = null }) {
   const normalizedScore = Math.max(0, Math.min(1, Number(score) || 0));
 
-  const size = 210;
-  const strokeWidth = 6;
+  const size = 200;
+  const strokeWidth = 5;
   const radius = (size - strokeWidth * 2) / 2;
   const center = size / 2;
 
@@ -13,20 +13,17 @@ export function AnomalyGauge({ score = 0, latestSession = null }) {
   const totalArcLength = (totalAngle / 360) * (2 * Math.PI * radius);
   const strokeDashoffset = totalArcLength * (1 - normalizedScore);
 
-  let statusText = "SAFE · NOMINAL BASELINE";
+  let statusText = "Nominal Baseline";
   let statusColor = "text-emerald-light";
-  let badgeBg = "bg-emerald-dim/40 border-emerald/40 text-emerald-light";
   let strokeColor = "#4E8C73";
 
   if (normalizedScore >= 0.75) {
-    statusText = "CRITICAL · ATTACK DETECTED";
+    statusText = "Critical Anomaly";
     statusColor = "text-carmine-light";
-    badgeBg = "bg-carmine-dim/40 border-carmine/40 text-carmine-light";
     strokeColor = "#B85555";
   } else if (normalizedScore >= 0.5) {
-    statusText = "HIGH RISK · ANOMALY DETECTED";
+    statusText = "Elevated Risk";
     statusColor = "text-brass-light";
-    badgeBg = "bg-brass-dim/40 border-brass/40 text-brass-light";
     strokeColor = "#CEAE72";
   }
 
@@ -40,20 +37,18 @@ export function AnomalyGauge({ score = 0, latestSession = null }) {
   const reason =
     latestSession?.flag_reason ||
     (normalizedScore >= 0.5
-      ? "ML Anomaly Threshold Exceeded"
-      : "Normal Sysadmin Session Baseline");
+      ? "Threshold exceeded"
+      : "Normal sysadmin activity");
 
   return (
     <div className="flex flex-col items-center justify-between h-full">
-      {/* Gauge Arc */}
       <div className="relative flex items-center justify-center">
         <svg
           width={size}
-          height={size * 0.78}
-          viewBox={`0 0 ${size} ${size * 0.82}`}
+          height={size * 0.76}
+          viewBox={`0 0 ${size} ${size * 0.8}`}
           className="overflow-visible"
         >
-          {/* Background Track */}
           <circle
             cx={center}
             cy={center}
@@ -67,7 +62,6 @@ export function AnomalyGauge({ score = 0, latestSession = null }) {
             transform={`rotate(150 ${center} ${center})`}
           />
 
-          {/* Animated Value Arc */}
           <motion.circle
             cx={center}
             cy={center}
@@ -78,18 +72,17 @@ export function AnomalyGauge({ score = 0, latestSession = null }) {
             strokeDasharray={`${totalArcLength} 9999`}
             initial={{ strokeDashoffset: totalArcLength }}
             animate={{ strokeDashoffset }}
-            transition={{ duration: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
+            transition={{ duration: 0.65, ease: [0.25, 0.1, 0.25, 1] }}
             strokeLinecap="butt"
             transform={`rotate(150 ${center} ${center})`}
           />
 
-          {/* Precision Tick Marks */}
           {ticks.map((t) => {
             const angle = 150 + t * totalAngle;
             const rad = (angle * Math.PI) / 180;
             const isThreshold = t === 0.5;
-            const innerR = radius - (isThreshold ? 9 : 5);
-            const outerR = radius + (isThreshold ? 9 : 5);
+            const innerR = radius - (isThreshold ? 8 : 4);
+            const outerR = radius + (isThreshold ? 8 : 4);
             const x1 = center + innerR * Math.cos(rad);
             const y1 = center + innerR * Math.sin(rad);
             const x2 = center + outerR * Math.cos(rad);
@@ -101,83 +94,77 @@ export function AnomalyGauge({ score = 0, latestSession = null }) {
                 y1={y1}
                 x2={x2}
                 y2={y2}
-                stroke={isThreshold ? "#C28B47" : "#4F5565"}
-                strokeWidth={isThreshold ? 2 : 1}
-                strokeDasharray={isThreshold ? "2 2" : undefined}
+                stroke={isThreshold ? "#C28B47" : "#3A4150"}
+                strokeWidth={isThreshold ? 1.5 : 1}
               />
             );
           })}
         </svg>
 
-        {/* Center Score Readout */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center pt-5 text-center pointer-events-none">
+        <div className="absolute inset-0 flex flex-col items-center justify-center pt-4 text-center pointer-events-none">
           <span
             key={normalizedScore.toFixed(3)}
-            className="text-4xl font-mono font-semibold text-ivory tracking-tight tabular-nums athena-settle"
+            className="text-4xl font-mono font-medium text-ivory tracking-tight tabular-nums athena-settle"
           >
             {normalizedScore.toFixed(3)}
           </span>
-          <span
-            className={`text-[10px] font-mono tracking-wider uppercase mt-1 px-2 py-0.5 border ${badgeBg}`}
-          >
+          <span className={`text-xs font-medium mt-1 ${statusColor}`}>
             {statusText}
           </span>
         </div>
       </div>
 
-      {/* Scale Legend */}
-      <div className="w-full flex items-center justify-between text-[10px] font-mono text-slate-muted border-t border-border-subtle pt-1.5 px-2">
-        <span className="text-emerald-light">0.00 SAFE</span>
-        <span className="text-amber">0.50 THRESHOLD</span>
-        <span className="text-carmine-light">1.00 CRITICAL</span>
+      <div className="w-full flex items-center justify-between text-[11px] font-mono text-slate-muted border-t border-border-subtle pt-1.5 px-1">
+        <span>0.00</span>
+        <span className="text-slate-text">0.50 threshold</span>
+        <span>1.00</span>
       </div>
 
-      {/* Live 4-Feature Vector Breakdown */}
-      <div className="w-full mt-3 pt-2.5 border-t border-border-subtle">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-text">
-            LATEST SESSION ML FEATURES
+      <div className="w-full mt-2.5 pt-2.5 border-t border-border-subtle">
+        <div className="flex items-center justify-between mb-2 text-[11px]">
+          <span className="text-slate-text font-medium">
+            Session Feature Vector
           </span>
-          <span className="text-[10px] font-mono text-brass-light">
+          <span className="font-mono text-slate-muted">
             {method === "RULE_PREFILTER"
-              ? "TIER-1 RULE + TIER-2 ML"
+              ? "Tier-1 Rule + Isolation Forest"
               : method === "BENIGN"
-              ? "NOMINAL BASELINE"
-              : "TIER-2 ISOLATION FOREST"}
+              ? "Baseline Inlier"
+              : "Isolation Forest"}
           </span>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 text-center font-mono">
-          <div className="bg-canvas/70 border border-border-subtle p-1.5">
-            <div className="text-[9px] text-slate-muted uppercase">RATE/MIN</div>
-            <div className="text-xs font-medium text-ivory mt-0.5 tabular-nums">
+        <div className="grid grid-cols-4 divide-x divide-border-subtle border border-border-subtle bg-canvas/50 text-center font-mono">
+          <div className="py-1.5 px-1">
+            <div className="text-[10px] text-slate-muted">Rate/min</div>
+            <div className="text-xs text-ivory mt-0.5 tabular-nums">
               {Number(rate).toFixed(1)}
             </div>
           </div>
-          <div className="bg-canvas/70 border border-border-subtle p-1.5">
-            <div className="text-[9px] text-slate-muted uppercase">FAILED</div>
+          <div className="py-1.5 px-1">
+            <div className="text-[10px] text-slate-muted">Failures</div>
             <div
-              className={`text-xs font-medium mt-0.5 tabular-nums ${
+              className={`text-xs mt-0.5 tabular-nums ${
                 failed >= 5 ? "text-carmine-light" : "text-ivory"
               }`}
             >
               {failed}
             </div>
           </div>
-          <div className="bg-canvas/70 border border-border-subtle p-1.5">
-            <div className="text-[9px] text-slate-muted uppercase">USERS</div>
+          <div className="py-1.5 px-1">
+            <div className="text-[10px] text-slate-muted">Users</div>
             <div
-              className={`text-xs font-medium mt-0.5 tabular-nums ${
+              className={`text-xs mt-0.5 tabular-nums ${
                 uniqueUsers >= 4 ? "text-amber" : "text-ivory"
               }`}
             >
               {uniqueUsers}
             </div>
           </div>
-          <div className="bg-canvas/70 border border-border-subtle p-1.5">
-            <div className="text-[9px] text-slate-muted uppercase">COMMANDS</div>
+          <div className="py-1.5 px-1">
+            <div className="text-[10px] text-slate-muted">Commands</div>
             <div
-              className={`text-xs font-medium mt-0.5 tabular-nums ${
+              className={`text-xs mt-0.5 tabular-nums ${
                 commands >= 3 ? "text-emerald-light" : "text-ivory"
               }`}
             >
@@ -187,7 +174,7 @@ export function AnomalyGauge({ score = 0, latestSession = null }) {
         </div>
 
         <div
-          className={`mt-2 px-2.5 py-1.5 border text-[11px] font-mono truncate ${badgeBg}`}
+          className="mt-2 text-[11px] text-slate-text truncate font-mono"
           title={reason}
         >
           {reason}
