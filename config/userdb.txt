@@ -1,0 +1,7 @@
+# Project Athena -- Cowrie Honeypot User Database
+# Permits legitimate baseline login (root:password) while rejecting all
+# dictionary brute-force and multi-user credential spray guesses.
+root:x:password
+sysadmin:x:athena2026
+root:x:!*
+*:x:!*

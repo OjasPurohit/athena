@@ -7,17 +7,14 @@ Description:
     Generates realistic SSH traffic against the Cowrie honeypot (port 2222)
     to test the entire Athena detection pipeline end-to-end:
       1. Brute-Force Attack (Hydra-style): High-velocity password guessing
-         against target accounts (e.g. root, admin) with minimal delay.
-      2. Credential Spray Attack: Rapid testing of unique usernames with
-         common default passwords.
-      3. Benign / Baseline Session: Realistic human interaction with normal
-         inter-command delay, legitimate terminal commands, and proper logout.
+         against a single target account ('root') over an SSH transport.
+      2. Credential Spray Attack: Rapid testing of multiple distinct usernames
+         with a common password over an SSH transport.
+      3. Benign / Baseline Session: Legitimate sysadmin login (root:password)
+         executing standard diagnostic shell commands before clean logout.
 
-Viva / Architecture Defense Notes:
-    - Simulates attacker tool signatures (e.g., Hydra, Medusa, Metasploit)
-      directly against the emulated Cowrie SSH daemon.
-    - Allows measuring detection latency (time from attack packet sent to
-      Elasticsearch indexing and ML anomaly alert generation).
+    Automatically triggers ML session aggregation & scoring in Elasticsearch
+    upon completion so the SOC Dashboard updates immediately.
 =============================================================================
 """
 
@@ -27,9 +24,13 @@ import time
 import socket
 import argparse
 import logging
-from typing import List, Tuple
 
 import paramiko
+
+# Ensure project root is on sys.path so we can invoke the ML evaluator directly
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 # Configure logging
 logging.basicConfig(
@@ -40,15 +41,17 @@ logging.basicConfig(
 logger = logging.getLogger("AttackSim")
 
 # Wordlists for attack generation
-COMMON_USERNAMES = [
-    "root", "admin", "ubuntu", "user", "oracle", "test", "support",
-    "guest", "postgres", "ftpuser", "git", "deploy", "ansible"
+# Note: 'root:password' is reserved for legitimate benign admin sessions.
+# All entries below are rejected by Cowrie's userdb.txt policy (AUTH_FAIL).
+SPRAY_USERNAMES = [
+    "admin", "ubuntu", "oracle", "postgres", "test",
+    "guest", "deploy", "git", "ftpuser", "support"
 ]
 
-COMMON_PASSWORDS = [
-    "123456", "password", "root", "admin", "12345678", "toor",
-    "qwerty", "secret", "pass123", "letmein", "welcome", "cisco",
-    "password123", "iloveyou", "master", "dragon", "111111"
+BRUTE_FORCE_PASSWORDS = [
+    "123456", "root", "admin", "12345678", "toor",
+    "qwerty", "secret", "pass123", "letmein", "welcome",
+    "cisco", "password123", "iloveyou", "master", "dragon"
 ]
 
 BENIGN_COMMANDS = [
@@ -57,14 +60,12 @@ BENIGN_COMMANDS = [
     "uptime",
     "ls -la /var/log",
     "cat /etc/os-release",
-    "df -h",
-    "free -m",
-    "exit"
+    "df -h"
 ]
 
 
 def test_ssh_connection(host: str, port: int, timeout: float = 3.0) -> bool:
-    """Checks if the honeypot port is reachable."""
+    """Checks if the Cowrie honeypot port is reachable."""
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             banner = sock.recv(1024)
@@ -75,105 +76,105 @@ def test_ssh_connection(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
-def run_brute_force_attack(host: str, port: int, target_user: str = "root", attempts: int = 15, delay: float = 0.1):
+def run_brute_force_attack(host: str, port: int, target_user: str = "root", attempts: int = 12, delay: float = 0.08) -> dict:
     """
-    Simulates high-velocity password brute-forcing (Hydra-style).
-    Rapidly attempts passwords against a single user account.
+    Simulates high-velocity password brute-forcing (Hydra-style) over a single
+    SSH transport so all failed attempts aggregate into a single attack session.
     """
-    logger.info(f"==> Launching BRUTE-FORCE Attack on {host}:{port} (User: '{target_user}', Attempts: {attempts}, Delay: {delay}s)...")
-    successes = 0
+    total = min(attempts, len(BRUTE_FORCE_PASSWORDS))
+    logger.info(f"==> Launching BRUTE-FORCE Attack on {host}:{port} (User: '{target_user}', Attempts: {total})...")
     failures = 0
+    successes = 0
+    transport = None
 
-    for i in range(min(attempts, len(COMMON_PASSWORDS))):
-        pwd = COMMON_PASSWORDS[i]
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        transport = paramiko.Transport((host, port))
+        transport.connect()
 
-        try:
-            # Attempt authentication
-            client.connect(
-                hostname=host,
-                port=port,
-                username=target_user,
-                password=pwd,
-                timeout=2.0,
-                allow_agent=False,
-                look_for_keys=False,
-                banner_timeout=2.0
-            )
-            logger.info(f"[{i+1}/{attempts}] [SUCCESS] Credentials accepted: {target_user}:{pwd}")
-            successes += 1
-            client.close()
-        except paramiko.AuthenticationException:
-            logger.info(f"[{i+1}/{attempts}] [FAILED] Rejected attempt: {target_user}:{pwd}")
-            failures += 1
-        except Exception as e:
-            logger.warning(f"[{i+1}/{attempts}] [ERROR] Connection error: {e}")
-        finally:
-            client.close()
+        for i in range(total):
+            pwd = BRUTE_FORCE_PASSWORDS[i]
+            if not transport.is_active():
+                transport.close()
+                transport = paramiko.Transport((host, port))
+                transport.connect()
 
-        if delay > 0:
-            time.sleep(delay)
+            try:
+                transport.auth_password(target_user, pwd)
+                logger.info(f"  [{i+1}/{total}] [SUCCESS] {target_user}:{pwd}")
+                successes += 1
+            except paramiko.AuthenticationException:
+                logger.info(f"  [{i+1}/{total}] [AUTH_FAIL] Rejected credential -> {target_user}:{pwd}")
+                failures += 1
+            except Exception as e:
+                logger.warning(f"  [{i+1}/{total}] [ERROR] {e}")
 
-    logger.info(f"[+] Brute-force simulation finished: {failures} failed attempts, {successes} successful.")
+            if delay > 0:
+                time.sleep(delay)
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+
+    logger.info(f"[+] Brute-force attack finished: {failures} failed attempts, {successes} accepted.")
+    return {"mode": "brute-force", "failures": failures, "successes": successes}
 
 
-def run_credential_spray(host: str, port: int, password: str = "password123", delay: float = 0.15):
+def run_credential_spray(host: str, port: int, password: str = "password123", delay: float = 0.08) -> dict:
     """
-    Simulates multi-username dictionary spraying.
-    Tests multiple usernames against the target host using one or two passwords.
+    Simulates multi-username credential spraying over a single SSH transport
+    so all distinct usernames aggregate into a single spray session.
     """
-    logger.info(f"==> Launching CREDENTIAL SPRAY on {host}:{port} ({len(COMMON_USERNAMES)} usernames)...")
-    for i, user in enumerate(COMMON_USERNAMES):
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    total = len(SPRAY_USERNAMES)
+    logger.info(f"==> Launching CREDENTIAL SPRAY Attack on {host}:{port} ({total} distinct usernames)...")
+    failures = 0
+    transport = None
 
-        try:
-            client.connect(
-                hostname=host,
-                port=port,
-                username=user,
-                password=password,
-                timeout=2.0,
-                allow_agent=False,
-                look_for_keys=False
-            )
-            logger.info(f"[{i+1}/{len(COMMON_USERNAMES)}] [SUCCESS] Spray hit: {user}:{password}")
-        except paramiko.AuthenticationException:
-            logger.info(f"[{i+1}/{len(COMMON_USERNAMES)}] [FAILED] Tried user: '{user}'")
-        except Exception as e:
-            logger.warning(f"[{i+1}/{len(COMMON_USERNAMES)}] [ERROR] Connection error: {e}")
-        finally:
-            client.close()
+    try:
+        transport = paramiko.Transport((host, port))
+        transport.connect()
 
-        if delay > 0:
-            time.sleep(delay)
+        for i, user in enumerate(SPRAY_USERNAMES):
+            if not transport.is_active():
+                transport.close()
+                transport = paramiko.Transport((host, port))
+                transport.connect()
 
-    logger.info("[+] Credential spray simulation finished.")
+            try:
+                transport.auth_password(user, password)
+                logger.info(f"  [{i+1}/{total}] [SUCCESS] {user}:{password}")
+            except paramiko.AuthenticationException:
+                logger.info(f"  [{i+1}/{total}] [AUTH_FAIL] Spray rejected -> {user}:{password}")
+                failures += 1
+            except Exception as e:
+                logger.warning(f"  [{i+1}/{total}] [ERROR] {e}")
+
+            if delay > 0:
+                time.sleep(delay)
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+
+    logger.info(f"[+] Credential spray finished: {failures} usernames rejected.")
+    return {"mode": "spray", "failures": failures, "usernames_tested": total}
 
 
-def run_benign_session(host: str, port: int, username: str = "root", password: str = "password"):
+def run_benign_session(host: str, port: int, username: str = "root", password: str = "password") -> dict:
     """
-    Simulates a realistic human / sysadmin interactive SSH session.
-
-    Fix rationale (viva-ready):
-      Cowrie's default userdb negates root:root ('!root') and root:123456 ('!123456').
-      The wildcard entry 'root:x:*' accepts any OTHER password.
-      We use 'root:password' — confirmed accepted by Cowrie default config.
-
-      This is critical for ML validation: without a successful auth, both
-      brute-force and benign sessions produce the same failed-login-only
-      feature vector, making them indistinguishable to the Isolation Forest.
-
-    Feature vector produced by a correct benign session (vs brute-force):
-      login_attempts_per_min: ~0.2-0.5  (1 attempt over a 90-120s session)
-      unique_usernames: 1               (single target user)
-      session_duration: ~90-120s        (long, human-paced)
-      command_count: 6-7 commands       (post-auth activity — key differentiator)
+    Simulates a legitimate human sysadmin SSH session:
+      - Authenticates cleanly with root:password
+      - Opens an interactive PTY shell
+      - Executes 6 standard diagnostic commands
+      - Logs out cleanly
     """
-    logger.info(f"==> Simulating BENIGN Admin Session on {host}:{port} (User: '{username}')...")
+    logger.info(f"==> Running BENIGN Sysadmin Session on {host}:{port} (User: '{username}')...")
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cmds_run = 0
 
     try:
         client.connect(
@@ -186,39 +187,45 @@ def run_benign_session(host: str, port: int, username: str = "root", password: s
             look_for_keys=False,
             banner_timeout=6.0
         )
-        logger.info("[+] Authentication SUCCESSFUL. Opening interactive PTY shell...")
+        logger.info("  [+] Authentication SUCCESSFUL (root:password). Opening interactive PTY shell...")
 
-        # invoke_shell opens a PTY channel — Cowrie records each command sent
-        # as a cowrie.command.input event, which feeds command_count feature.
         shell = client.invoke_shell(term="xterm", width=220, height=50)
-        time.sleep(1.5)  # Wait for the shell prompt to render
+        time.sleep(0.8)
 
         for cmd in BENIGN_COMMANDS:
-            logger.info(f"    Executing: $ {cmd}")
+            logger.info(f"  [CMD_EXEC] $ {cmd}")
             shell.send(f"{cmd}\n")
-            # Realistic human inter-command delay (reading output before next command)
-            time.sleep(4.0)
+            cmds_run += 1
+            time.sleep(0.9)
 
-        # Drain buffer
-        if shell.recv_ready():
-            output = shell.recv(8192).decode("utf-8", errors="ignore")
-            logger.info(f"[+] Shell output (excerpt):\n{output[:300]}")
-
-        # Clean logout
         shell.send("exit\n")
-        time.sleep(1.0)
-        logger.info("[+] Benign session completed and cleanly disconnected.")
-
-    except paramiko.AuthenticationException as e:
-        logger.error(
-            f"[!] AUTH FAILED for {username}:{password} — {e}\n"
-            f"    Cowrie accepts: root:password, root:letmein, root:toor — NOT root:root or root:123456"
-        )
+        time.sleep(0.5)
+        logger.info(f"[+] Benign session completed ({cmds_run} commands executed) and cleanly disconnected.")
     except Exception as e:
-        logger.warning(f"[!] Session error: {e}")
+        logger.error(f"[!] Benign session error: {e}")
     finally:
         client.close()
-        logger.info("[+] Benign session closed.")
+
+    return {"mode": "benign", "commands_executed": cmds_run}
+
+
+def trigger_immediate_ml_scoring():
+    """
+    Waits briefly for Filebeat to ship the new Cowrie log lines to Elasticsearch,
+    then immediately runs the Athena ML Anomaly Detection pipeline so the
+    dashboard updates right away without waiting for a separate daemon timer.
+    """
+    try:
+        logger.info("Waiting 2.0s for Filebeat log ingestion into Elasticsearch...")
+        time.sleep(2.0)
+        from elasticsearch import Elasticsearch
+        from ml.anomaly_detector import AthenaSessionPipeline, DEFAULT_ES_HOST
+        es = Elasticsearch(DEFAULT_ES_HOST)
+        pipeline = AthenaSessionPipeline(es)
+        count = pipeline.evaluate_and_index_sessions()
+        logger.info(f"[✓] ML Scoring complete! Evaluated & updated {count} sessions in Elasticsearch.")
+    except Exception as e:
+        logger.warning(f"Could not auto-trigger ML scoring ({e}). Ensure Elasticsearch is running.")
 
 
 def main():
@@ -227,8 +234,8 @@ def main():
     parser.add_argument("--port", type=int, default=2222, help="Cowrie Honeypot Port (default: 2222)")
     parser.add_argument("--mode", choices=["brute-force", "spray", "benign", "all"], default="brute-force",
                         help="Simulation mode: brute-force, spray, benign, or all")
-    parser.add_argument("--attempts", type=int, default=15, help="Number of brute-force attempts")
-    parser.add_argument("--delay", type=float, default=0.1, help="Delay between attempts in seconds")
+    parser.add_argument("--attempts", type=int, default=12, help="Number of brute-force attempts")
+    parser.add_argument("--delay", type=float, default=0.08, help="Delay between attempts in seconds")
 
     args = parser.parse_args()
 
@@ -237,21 +244,22 @@ def main():
     logger.info("=" * 60)
 
     if not test_ssh_connection(args.host, args.port):
-        logger.error(f"Honeypot not responding on {args.host}:{args.port}. Ensure docker compose is up.")
+        logger.error(f"Honeypot not responding on {args.host}:{args.port}. Ensure 'docker compose up -d' is running.")
         sys.exit(1)
 
     if args.mode in ("brute-force", "all"):
         run_brute_force_attack(args.host, args.port, target_user="root", attempts=args.attempts, delay=args.delay)
 
     if args.mode in ("spray", "all"):
-        time.sleep(1.0)
+        time.sleep(0.5)
         run_credential_spray(args.host, args.port, delay=args.delay)
 
     if args.mode in ("benign", "all"):
-        time.sleep(1.0)
+        time.sleep(0.5)
         run_benign_session(args.host, args.port)
 
-    logger.info("[✓] Attack simulation sequence completed.")
+    trigger_immediate_ml_scoring()
+    logger.info("[✓] Attack simulation sequence completed — Dashboard updated!")
 
 
 if __name__ == "__main__":

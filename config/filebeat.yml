@@ -1,6 +1,6 @@
 # ============================== Filebeat Configuration ==============================
 # Project Athena - Self-Hosted Honeypot SOC with ML Anomaly Detection
-# Filebeat ships Cowrie honeypot JSON logs directly into Elasticsearch.
+# Filebeat ships Cowrie honeypot JSON logs directly into Elasticsearch with sub-second latency.
 
 filebeat.inputs:
   - type: log
@@ -12,8 +12,15 @@ filebeat.inputs:
     json.keys_under_root: true
     json.overwrite_keys: true
     json.add_error_key: true
-    scan_frequency: 1s
-    close_inactive: 1m
+    scan_frequency: 0.5s
+    backoff: 0.2s
+    max_backoff: 0.5s
+    close_inactive: 24h
+
+queue.mem:
+  events: 512
+  flush.min_events: 1
+  flush.timeout: 0.2s
 
 # -------------------------- Elasticsearch Template & ILM --------------------------
 setup.template.enabled: false

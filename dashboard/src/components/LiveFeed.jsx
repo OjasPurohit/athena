@@ -4,9 +4,11 @@ import { motion, AnimatePresence } from "framer-motion";
 export function LiveFeed({ events = [] }) {
   if (!events || events.length === 0) {
     return (
-      <div className="h-64 flex flex-col items-center justify-center text-slate-muted font-mono text-xs">
-        <span className="animate-pulse">WAITING FOR HONEYPOT TELEMETRY STREAM...</span>
-        <span className="text-[10px] mt-1 text-slate-dim">Awaiting connection on Cowrie port 2222</span>
+      <div className="h-56 flex flex-col items-center justify-center text-slate-muted font-mono text-xs">
+        <span>WAITING FOR HONEYPOT TELEMETRY...</span>
+        <span className="text-[10px] mt-1 text-slate-dim">
+          Click a simulation button above or connect to SSH port 2222
+        </span>
       </div>
     );
   }
@@ -21,38 +23,51 @@ export function LiveFeed({ events = [] }) {
     }
   }
 
-  function getEventLabel(eventid) {
-    if (!eventid) return "EVENT";
-    if (eventid.includes("login.failed")) return "AUTH_FAIL";
-    if (eventid.includes("login.success")) return "AUTH_SUCCESS";
-    if (eventid.includes("command.input")) return "CMD_EXEC";
-    if (eventid.includes("session.connect")) return "CONNECT";
-    if (eventid.includes("session.closed")) return "DISCONNECT";
-    return eventid.replace("cowrie.", "").toUpperCase();
-  }
-
-  function getEventBadge(eventid) {
+  function getEventConfig(eventid) {
     if (eventid?.includes("login.failed")) {
-      return "text-carmine-light bg-carmine-dim/30 border-carmine/30";
+      return {
+        label: "✗ AUTH FAIL",
+        badge: "text-carmine-light bg-carmine-dim/40 border-carmine/40",
+        rowBorder: "border-l-2 border-l-carmine",
+      };
     }
     if (eventid?.includes("login.success")) {
-      return "text-amber bg-amber-dim/30 border-amber/30";
+      return {
+        label: "✓ LOGIN OK",
+        badge: "text-emerald-light bg-emerald-dim/40 border-emerald/40",
+        rowBorder: "border-l-2 border-l-emerald",
+      };
     }
-    if (eventid?.includes("command.input")) {
-      return "text-brass-light bg-brass-dim/30 border-brass/30";
+    if (eventid?.includes("command.input") || eventid?.includes("command.failed")) {
+      return {
+        label: "$ COMMAND",
+        badge: "text-brass-light bg-brass-dim/40 border-brass/40",
+        rowBorder: "border-l-2 border-l-brass",
+      };
     }
-    return "text-slate-text bg-surface-hover border-border-subtle";
+    if (eventid?.includes("session.connect")) {
+      return {
+        label: "→ CONNECT",
+        badge: "text-ivory-dim bg-surface-hover border-border-subtle",
+        rowBorder: "border-l-2 border-l-slate-muted",
+      };
+    }
+    return {
+      label: "← CLOSED",
+      badge: "text-slate-text bg-surface-hover border-border-subtle",
+      rowBorder: "border-l-2 border-l-transparent",
+    };
   }
 
   return (
-    <div className="flex-1 overflow-y-auto max-h-[390px] divide-y divide-border-subtle pr-1 font-mono text-xs">
+    <div className="flex-1 overflow-y-auto divide-y divide-border-subtle pr-1 font-mono text-xs">
       <AnimatePresence initial={false}>
         {events.map((evt, idx) => {
-          const key = evt.timestamp ? `${evt.timestamp}-${idx}` : idx;
-          let borderAccent = "";
-          if (evt.eventid?.includes("login.failed")) borderAccent = "border-l-2 border-l-carmine/50";
-          else if (evt.eventid?.includes("login.success")) borderAccent = "border-l-2 border-l-amber/50";
-          else if (evt.eventid?.includes("command.input")) borderAccent = "border-l-2 border-l-brass/40";
+          const key = evt.timestamp
+            ? `${evt.session || ""}-${evt.timestamp}-${evt.eventid}-${idx}`
+            : idx;
+          const cfg = getEventConfig(evt.eventid);
+          const isCmd = evt.eventid?.includes("command.");
 
           return (
             <motion.div
@@ -60,34 +75,53 @@ export function LiveFeed({ events = [] }) {
               initial={{ opacity: 0, x: -6 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeOut" }}
-              className={`py-2.5 px-2 flex items-start space-x-3 hover:bg-surface-hover/40 transition-colors duration-300 ${borderAccent}`}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className={`py-2 px-2.5 flex items-center space-x-3 hover:bg-surface-hover/50 transition-colors duration-200 ${cfg.rowBorder}`}
             >
-              <span className="text-[11px] text-slate-muted whitespace-nowrap pt-0.5">
+              <span className="text-[11px] text-slate-muted whitespace-nowrap tabular-nums">
                 {formatTime(evt.timestamp)}
               </span>
+
               <span
-                className={`text-[9px] px-1.5 py-0.2 border whitespace-nowrap uppercase tracking-wider ${getEventBadge(
-                  evt.eventid
-                )}`}
+                className={`text-[10px] w-24 text-center px-1.5 py-0.5 border whitespace-nowrap uppercase tracking-wider ${cfg.badge}`}
               >
-                {getEventLabel(evt.eventid)}
+                {cfg.label}
               </span>
-              <span className="text-[11px] text-ivory-dim font-medium whitespace-nowrap">
-                {evt.src_ip || "0.0.0.0"}
+
+              <span className="text-[11px] text-ivory-dim font-medium whitespace-nowrap tabular-nums">
+                {evt.src_ip || "172.18.0.1"}
               </span>
+
               <div className="flex-1 text-[11px] text-slate-text truncate">
                 {evt.username ? (
                   <span>
                     user: <strong className="text-ivory">{evt.username}</strong>
                     {evt.password && (
-                      <span> pass: <strong className="text-brass-light">{evt.password}</strong></span>
+                      <span>
+                        {" "}
+                        · pass:{" "}
+                        <strong
+                          className={
+                            evt.eventid?.includes("failed")
+                              ? "text-carmine-light"
+                              : "text-emerald-light"
+                          }
+                        >
+                          {evt.password}
+                        </strong>
+                      </span>
                     )}
                   </span>
+                ) : isCmd ? (
+                  <span className="text-brass-light font-medium">
+                    {evt.message?.startsWith("CMD: ")
+                      ? `$ ${evt.message.slice(5)}`
+                      : evt.message}
+                  </span>
                 ) : evt.message ? (
-                  <span className="text-ivory-dim">{evt.message}</span>
+                  <span className="text-slate-text">{evt.message}</span>
                 ) : (
-                  <span>Session {evt.session?.slice(0, 8) || "N/A"}</span>
+                  <span>Session #{evt.session?.slice(0, 8) || "N/A"}</span>
                 )}
               </div>
             </motion.div>

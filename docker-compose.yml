@@ -12,6 +12,7 @@ services:
     volumes:
       - cowrie-var:/cowrie/cowrie-git/var
       - cowrie-etc:/cowrie/cowrie-git/etc
+      - ./config/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
     networks:
       - athena-net
 

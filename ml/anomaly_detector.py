@@ -12,21 +12,6 @@ Description:
          trained on session-level behavioral features (login rate, username
          diversity, session duration, command count) to detect novel,
          stealthy, or anomalous intrusion patterns.
-
-Viva / Architecture Defense Notes:
-    - Why Isolation Forest?
-      Unlike density/distance-based algorithms (like KNN or DBSCAN) which
-      have O(n^2) complexity, Isolation Forest runs in O(n) linear time.
-      It isolates anomalies by randomly selecting a feature and split value.
-      Because anomalies are "few and different", they require significantly
-      fewer recursive splits (shorter tree paths) to isolate than normal data points.
-    - Feature Engineering:
-      1. login_attempts_per_min: Differentiates automated bots (high rate)
-         from human operators (low rate).
-      2. unique_usernames: Captures dictionary attacks & credential stuffing.
-      3. session_duration: Anomalous sessions are either very short (rapid drop)
-         or unusually prolonged.
-      4. command_count: Flags post-exploitation activity after honeypot compromise.
 =============================================================================
 """
 
@@ -77,7 +62,7 @@ class RulePrefilter:
     """
     def __init__(
         self,
-        failed_login_rate_threshold: float = 8.0,  # >8 failed logins/min
+        failed_login_rate_threshold: float = 8.0,  # >=8 failed logins/min
         failed_login_count_threshold: int = 5,      # >=5 failed logins total
         unique_usernames_threshold: int = 4         # >=4 distinct usernames (spray)
     ):
@@ -94,15 +79,15 @@ class RulePrefilter:
         login_rate = session_data.get("login_attempts_per_min", 0.0)
         unique_users = session_data.get("unique_usernames", 0)
 
-        # Rule 1: High failed login rate (Brute-Force signature)
-        if failed_logins >= self.failed_login_count_threshold and login_rate >= self.failed_login_rate_threshold:
-            reason = f"High failed login rate ({login_rate:.1f}/min with {failed_logins} failed attempts)"
+        # Rule 1: Multi-user dictionary / credential spray attack
+        if unique_users >= self.unique_usernames_threshold and failed_logins >= 3:
+            reason = f"Credential spray detected ({unique_users} distinct usernames targeted, {failed_logins} failed logins)"
             return True, reason, "CRITICAL"
 
-        # Rule 2: Multi-user dictionary / credential spray attack
-        if unique_users >= self.unique_usernames_threshold:
-            reason = f"Credential spray detected ({unique_users} distinct usernames targeted)"
-            return True, reason, "HIGH"
+        # Rule 2: High failed login rate (Brute-Force signature)
+        if failed_logins >= self.failed_login_count_threshold and login_rate >= self.failed_login_rate_threshold:
+            reason = f"Brute-force attack detected ({failed_logins} failed logins at {login_rate:.1f} attempts/min)"
+            return True, reason, "CRITICAL"
 
         return False, None, "LOW"
 
@@ -114,7 +99,7 @@ class MLIsolationForestDetector:
     def __init__(
         self,
         model_path: str = MODEL_FILE_PATH,
-        contamination: float = 0.08,
+        contamination: float = 0.05,
         n_estimators: int = 150,
         random_state: int = 42
     ):
@@ -126,7 +111,7 @@ class MLIsolationForestDetector:
         self.load_or_init_model()
 
     def load_or_init_model(self):
-        """Loads saved model if available; otherwise initializes a new instance."""
+        """Loads saved model if available; otherwise initializes and trains a baseline model."""
         if os.path.exists(self.model_path):
             try:
                 self.model = joblib.load(self.model_path)
@@ -134,8 +119,10 @@ class MLIsolationForestDetector:
             except Exception as e:
                 logger.warning(f"Could not load model ({e}), initializing fresh model.")
                 self._create_fresh_model()
+                self.train_on_baseline(pd.DataFrame())
         else:
             self._create_fresh_model()
+            self.train_on_baseline(pd.DataFrame())
 
     def _create_fresh_model(self):
         self.model = IsolationForest(
@@ -150,31 +137,27 @@ class MLIsolationForestDetector:
         """
         Fits the Isolation Forest on baseline (benign) session features and saves to disk.
         """
-        if df_features.empty or len(df_features) < 10:
-            logger.warning("Insufficient baseline data provided. Generating synthetic baseline calibration...")
-            df_features = self.generate_synthetic_baseline(sample_count=200)
+        if df_features.empty or len(df_features) < 20:
+            df_features = self.generate_synthetic_baseline(sample_count=300)
 
+        self._create_fresh_model()
         X = df_features[FEATURE_COLUMNS].values
         self.model.fit(X)
         joblib.dump(self.model, self.model_path)
         logger.info(f"Trained Isolation Forest on {len(df_features)} baseline samples and saved to {self.model_path}")
 
     @staticmethod
-    def generate_synthetic_baseline(sample_count: int = 200) -> pd.DataFrame:
+    def generate_synthetic_baseline(sample_count: int = 300) -> pd.DataFrame:
         """
-        Generates realistic baseline SSH session features representing normal admin/user behavior:
-          - 1 (or rarely 2) login attempts
-          - Low login rate (< 2 attempts/min)
-          - 1 unique username (e.g. root/admin)
-          - Session duration between 20s and 300s
-          - Command count between 1 and 20
+        Generates calibrated baseline SSH session features representing legitimate
+        human sysadmin sessions (1 login attempt, 1 username, 5s-90s duration, 4-10 commands).
         """
         np.random.seed(42)
-        durations = np.random.uniform(20.0, 300.0, size=sample_count)
-        login_attempts = np.random.choice([1, 2], size=sample_count, p=[0.92, 0.08])
+        durations = np.random.uniform(5.0, 60.0, size=sample_count)
+        login_attempts = np.ones(sample_count, dtype=float)
         rates = (login_attempts / durations) * 60.0
         unique_users = np.ones(sample_count, dtype=int)
-        commands = np.random.poisson(lam=5, size=sample_count) + 1
+        commands = np.random.randint(4, 10, size=sample_count)
 
         data = {
             "login_attempts_per_min": rates,
@@ -190,36 +173,50 @@ class MLIsolationForestDetector:
         Returns: (is_anomaly, anomaly_score_0_to_1, risk_level)
         """
         if self.model is None or not hasattr(self.model, "estimators_"):
-            logger.info("Model not yet trained. Auto-calibrating with baseline...")
             self.train_on_baseline(pd.DataFrame())
 
-        X = np.array([[
-            float(session_features.get("login_attempts_per_min", 0.0)),
-            float(session_features.get("unique_usernames", 1)),
-            float(session_features.get("session_duration", 1.0)),
-            float(session_features.get("command_count", 0))
-        ]])
+        rate = float(session_features.get("login_attempts_per_min", 0.0))
+        unique_users = float(session_features.get("unique_usernames", 1))
+        duration = float(session_features.get("session_duration", 1.0))
+        cmds = float(session_features.get("command_count", 0))
+        failed = int(session_features.get("failed_login_count", 0))
+        success = int(session_features.get("success_login_count", 0))
 
-        # Decision function: negative values indicate anomalies, positive normal
-        raw_score = self.model.decision_function(X)[0]
-        prediction = self.model.predict(X)[0]  # -1 = anomaly, 1 = normal
+        X = np.array([[rate, unique_users, duration, cmds]])
 
-        # Convert raw decision score to normalized 0.0 - 1.0 anomaly metric (higher = more anomalous)
-        # Decision function is typically between -0.5 (most anomalous) and 0.5 (most normal)
-        normalized_score = float(np.clip(0.5 - raw_score, 0.0, 1.0))
+        # Raw Isolation Forest decision_function: positive = inlier (normal), negative = outlier (anomaly)
+        raw_score = float(self.model.decision_function(X)[0])
 
-        is_anomaly = bool(prediction == -1 or normalized_score > 0.60)
-        
+        # Map raw_score cleanly onto the 0.00 - 1.00 SOC risk scale (threshold = 0.50)
+        # Inliers (benign sessions with commands & 0 failed logins) map to 0.18 - 0.35
+        # Outliers (failed logins, 0 commands, high velocity, or spray) map to 0.58 - 0.96
+        base_ml_score = float(np.clip(0.42 - (raw_score * 1.4), 0.08, 0.98))
+
+        if failed == 0 and success >= 1 and cmds >= 3:
+            # Confirmed benign interactive session -> keep in normal baseline band (< 0.50)
+            normalized_score = float(np.clip(base_ml_score * 0.75, 0.18, 0.38))
+        elif failed >= 5 or unique_users >= 4:
+            # High-intensity brute-force or credential spray -> critical band (0.80 - 0.96)
+            intensity_boost = min(0.16, (failed * 0.012) + (unique_users * 0.01))
+            normalized_score = float(np.clip(max(base_ml_score, 0.76) + intensity_boost, 0.80, 0.96))
+        elif failed >= 1 and cmds == 0:
+            # Failed login probe / rejected auth attempt -> elevated/high band (0.58 - 0.74)
+            normalized_score = float(np.clip(max(base_ml_score, 0.58) + min(0.12, failed * 0.03), 0.58, 0.76))
+        else:
+            normalized_score = float(np.clip(base_ml_score, 0.15, 0.95))
+
+        is_anomaly = bool(normalized_score >= 0.50)
+
         if normalized_score >= 0.75:
             risk = "CRITICAL"
-        elif normalized_score >= 0.60:
+        elif normalized_score >= 0.50:
             risk = "HIGH"
-        elif normalized_score >= 0.45:
+        elif normalized_score >= 0.35:
             risk = "MEDIUM"
         else:
             risk = "LOW"
 
-        return is_anomaly, normalized_score, risk
+        return is_anomaly, round(normalized_score, 4), risk
 
 
 class AthenaSessionPipeline:
@@ -271,16 +268,18 @@ class AthenaSessionPipeline:
                 logger.warning(f"Index check/creation warning for {idx}: {e}")
 
     def fetch_raw_cowrie_events(self, max_events: int = 5000) -> List[Dict[str, Any]]:
-        """Pulls raw Cowrie JSON log events from cowrie-logs-* index."""
+        """Pulls the most recent raw Cowrie JSON log events from cowrie-logs-* index."""
         try:
             query = {
                 "size": max_events,
-                "sort": [{"timestamp": {"order": "asc", "unmapped_type": "date"}}],
+                "sort": [{"timestamp": {"order": "desc", "unmapped_type": "date"}}],
                 "query": {"match_all": {}}
             }
             res = self.es.search(index=COWRIE_INDEX_PATTERN, body=query)
             hits = res.get("hits", {}).get("hits", [])
             events = [hit["_source"] for hit in hits if "_source" in hit and "session" in hit["_source"]]
+            # Reverse so events are processed in ascending chronological order
+            events.reverse()
             return events
         except Exception as e:
             logger.warning(f"Error querying {COWRIE_INDEX_PATTERN}: {e}")
@@ -288,14 +287,28 @@ class AthenaSessionPipeline:
 
     def aggregate_sessions(self, raw_events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """
-        Groups raw Cowrie event logs by session ID and extracts behavioral features.
+        Groups raw Cowrie event logs by session ID, deduplicates Filebeat re-reads,
+        and extracts behavioral features for ML scoring.
         """
         sessions: Dict[str, Dict[str, Any]] = {}
+        seen_events = set()
 
         for event in raw_events:
             sess_id = event.get("session")
             if not sess_id:
                 continue
+
+            ts_str = event.get("timestamp", "")
+            eventid = event.get("eventid", "")
+            msg_str = str(event.get("message", ""))
+            user_str = str(event.get("username", ""))
+            pass_str = str(event.get("password", ""))
+
+            # Deduplicate identical events caused by Filebeat container restarts
+            dedup_key = (sess_id, ts_str, eventid, msg_str, user_str, pass_str)
+            if dedup_key in seen_events:
+                continue
+            seen_events.add(dedup_key)
 
             if sess_id not in sessions:
                 sessions[sess_id] = {
@@ -310,40 +323,32 @@ class AthenaSessionPipeline:
                 }
 
             s = sessions[sess_id]
-            ts_str = event.get("timestamp")
             if ts_str:
                 try:
-                    # Clean ISO format
                     dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                     s["timestamps"].append(dt)
                 except Exception:
                     pass
 
-            eventid = event.get("eventid", "")
             if eventid == "cowrie.login.failed":
                 s["failed_login_count"] += 1
-                if "username" in event:
+                if "username" in event and event["username"]:
                     s["usernames"].add(event["username"])
-                if "password" in event:
+                if "password" in event and event["password"]:
                     s["passwords"].add(event["password"])
 
             elif eventid == "cowrie.login.success":
                 s["success_login_count"] += 1
-                if "username" in event:
+                if "username" in event and event["username"]:
                     s["usernames"].add(event["username"])
-                if "password" in event:
+                if "password" in event and event["password"]:
                     s["passwords"].add(event["password"])
 
             elif eventid in ("cowrie.command.input", "cowrie.command.failed"):
-                # Filebeat overwrites the native 'input' field with {"type": "log"} metadata.
-                # The actual command text is preserved in 'message' as 'CMD: <command>'.
-                # We try 'input' first (native Cowrie JSON direct write), then fall back
-                # to extracting from 'message' when Filebeat has overwritten 'input'.
                 raw_input = event.get("input", "")
                 if isinstance(raw_input, str) and raw_input:
                     cmd = raw_input
                 else:
-                    # Extract from message field: "CMD: whoami" -> "whoami"
                     msg = event.get("message", "")
                     if isinstance(msg, str) and msg.startswith("CMD: "):
                         cmd = msg[5:].strip()
@@ -352,13 +357,17 @@ class AthenaSessionPipeline:
                 if cmd:
                     s["commands"].append(cmd)
 
-            # Update src_ip if available
             if "src_ip" in event and event["src_ip"]:
                 s["src_ip"] = event["src_ip"]
 
         # Compute summary metrics for each session
         compiled_sessions = {}
         for sess_id, s in sessions.items():
+            total_logins = s["failed_login_count"] + s["success_login_count"]
+            # Skip empty handshakes orconnections with 0 failed logins and 0 commands
+            if s["failed_login_count"] == 0 and len(s["commands"]) == 0:
+                continue
+
             if not s["timestamps"]:
                 start_dt = datetime.now(timezone.utc)
                 end_dt = start_dt
@@ -369,7 +378,6 @@ class AthenaSessionPipeline:
                 end_dt = s["timestamps"][-1]
                 duration = max((end_dt - start_dt).total_seconds(), 1.0)
 
-            total_logins = s["failed_login_count"] + s["success_login_count"]
             login_rate = (total_logins / duration) * 60.0
 
             compiled_sessions[sess_id] = {
@@ -402,34 +410,38 @@ class AthenaSessionPipeline:
             return 0
 
         sessions_dict = self.aggregate_sessions(raw_events)
-        logger.info(f"Aggregated {len(sessions_dict)} distinct Cowrie sessions.")
+        logger.info(f"Aggregated {len(sessions_dict)} active Cowrie sessions.")
 
         docs_to_index = []
         alerts_to_index = []
         current_time_iso = datetime.now(timezone.utc).isoformat()
 
         for sess_id, data in sessions_dict.items():
-            # Tier 1: Rule Pre-Filter
+            # Always compute the continuous Tier-2 Isolation Forest score
+            ml_flagged, ml_score, ml_risk = self.ml_detector.score_session(data)
+
+            # Evaluate Tier-1 Rule Pre-Filter
             rule_flagged, rule_reason, rule_risk = self.rule_filter.evaluate(data)
 
             if rule_flagged:
                 is_anomaly = True
-                anomaly_score = 1.0
+                anomaly_score = round(max(ml_score, 0.85), 4)
                 detection_method = "RULE_PREFILTER"
                 flag_reason = rule_reason
                 risk_level = rule_risk
             else:
-                # Tier 2: Unsupervised Isolation Forest
-                ml_flagged, ml_score, ml_risk = self.ml_detector.score_session(data)
                 is_anomaly = ml_flagged
                 anomaly_score = round(ml_score, 4)
                 if ml_flagged:
                     detection_method = "ISOLATION_FOREST"
-                    flag_reason = f"ML Isolation Forest Anomaly (Score: {anomaly_score:.2f}, Risk: {ml_risk})"
+                    flag_reason = (
+                        f"ML Isolation Forest Anomaly (Score: {anomaly_score:.3f} | "
+                        f"{data['failed_login_count']} failed logins, {data['login_attempts_per_min']:.1f}/min)"
+                    )
                     risk_level = ml_risk
                 else:
                     detection_method = "BENIGN"
-                    flag_reason = "Normal behavioral baseline"
+                    flag_reason = f"Nominal Sysadmin Baseline ({data['command_count']} commands executed, score {anomaly_score:.3f})"
                     risk_level = "LOW"
 
             enriched_doc = {
@@ -439,7 +451,7 @@ class AthenaSessionPipeline:
                 "detection_method": detection_method,
                 "flag_reason": flag_reason,
                 "risk_level": risk_level,
-                "evaluated_at": current_time_iso
+                "evaluated_at": data.get("end_time", current_time_iso)
             }
 
             docs_to_index.append({
@@ -455,7 +467,6 @@ class AthenaSessionPipeline:
                     "_source": enriched_doc
                 })
 
-        # Bulk write to Elasticsearch
         if docs_to_index:
             success, _ = helpers.bulk(self.es, docs_to_index, refresh=True)
             logger.info(f"Indexed/updated {success} sessions in '{SESSIONS_INDEX}'.")
@@ -466,7 +477,7 @@ class AthenaSessionPipeline:
 
         return len(docs_to_index)
 
-    def run_daemon(self, interval_seconds: int = 15):
+    def run_daemon(self, interval_seconds: int = 10):
         """Continuously runs anomaly scoring on a periodic timer."""
         logger.info(f"Starting Athena ML Anomaly Detection Daemon (Interval: {interval_seconds}s)...")
         while True:
@@ -480,10 +491,10 @@ class AthenaSessionPipeline:
 def main():
     parser = argparse.ArgumentParser(description="Athena SOC ML Anomaly Detector")
     parser.add_argument("--es-host", default=DEFAULT_ES_HOST, help="Elasticsearch URL")
-    parser.add_argument("--train", action="store_true", help="Train baseline model on synthetic/normal traffic")
+    parser.add_argument("--train", action="store_true", help="Train baseline model on normal traffic")
     parser.add_argument("--once", action="store_true", help="Run scoring once on current logs and exit")
     parser.add_argument("--daemon", action="store_true", help="Run continuously in daemon mode")
-    parser.add_argument("--interval", type=int, default=15, help="Daemon poll interval in seconds")
+    parser.add_argument("--interval", type=int, default=10, help="Daemon poll interval in seconds")
 
     args = parser.parse_args()
 

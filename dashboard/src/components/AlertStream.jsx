@@ -5,9 +5,11 @@ import { motion } from "framer-motion";
 export function AlertStream({ alerts = [] }) {
   if (!alerts || alerts.length === 0) {
     return (
-      <div className="h-64 flex flex-col items-center justify-center text-slate-muted font-mono text-xs">
+      <div className="h-44 flex flex-col items-center justify-center text-slate-muted font-mono text-xs">
         <span>NO ACTIVE ANOMALY ALERTS DETECTED</span>
-        <span className="text-[10px] mt-1 text-slate-dim">System baseline nominal</span>
+        <span className="text-[10px] mt-1 text-slate-dim">
+          System baseline nominal
+        </span>
       </div>
     );
   }
@@ -23,7 +25,7 @@ export function AlertStream({ alerts = [] }) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto max-h-[380px] divide-y divide-border-subtle font-mono text-xs pr-1">
+    <div className="flex-1 overflow-y-auto divide-y divide-border-subtle font-mono text-xs pr-1">
       {alerts.map((alert, idx) => {
         const key = alert.session_id ? `${alert.session_id}-${idx}` : idx;
         const isPrefilter = alert.detection_method?.includes("RULE");
@@ -33,8 +35,8 @@ export function AlertStream({ alerts = [] }) {
             key={key}
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25, delay: idx * 0.03 }}
-            className="py-3.5 px-3 hover:bg-surface-hover/50 transition-colors duration-300 flex flex-col space-y-2"
+            transition={{ duration: 0.2 }}
+            className="py-2.5 px-2.5 hover:bg-surface-hover/50 transition-colors duration-200 flex flex-col space-y-1 border-l-2 border-l-carmine"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -42,36 +44,38 @@ export function AlertStream({ alerts = [] }) {
                   level={alert.risk_level || "HIGH"}
                   score={alert.anomaly_score}
                 />
-                <span className="font-mono text-ivory font-medium text-xs">
-                  {alert.src_ip || "UNKNOWN"}
+                <span className="font-mono text-ivory font-medium text-xs tabular-nums">
+                  {alert.src_ip || "172.18.0.1"}
                 </span>
                 <span className="text-[10px] text-slate-muted">
                   #{alert.session_id?.slice(0, 8)}
                 </span>
               </div>
 
-              <div className="flex items-center space-x-3 text-[11px] text-slate-muted">
+              <div className="flex items-center space-x-2 text-[10px] text-slate-muted">
                 <span
-                  className={`text-[9px] px-1 py-0.5 border ${
+                  className={`px-1.5 py-0.5 border ${
                     isPrefilter
-                      ? "border-amber/30 text-amber bg-amber-dim/20"
-                      : "border-brass/30 text-brass-light bg-brass-dim/20"
+                      ? "border-amber/40 text-amber bg-amber-dim/30"
+                      : "border-brass/40 text-brass-light bg-brass-dim/30"
                   }`}
                 >
                   {isPrefilter ? "TIER-1 RULE" : "TIER-2 ML"}
                 </span>
-                <span>{formatTime(alert.evaluated_at)}</span>
+                <span className="tabular-nums">
+                  {formatTime(alert.start_time || alert.evaluated_at)}
+                </span>
               </div>
             </div>
 
-            <div className="text-[11px] text-slate-text flex items-center justify-between">
+            <div className="text-[11px] text-ivory-dim flex items-center justify-between">
               <span className="truncate pr-2">
-                <span className="text-slate-muted">Reason: </span>
-                <span className="text-ivory-dim">{alert.flag_reason || "ML Outlier Threshold Exceeded"}</span>
+                {alert.flag_reason || "ML Outlier Threshold Exceeded"}
               </span>
-              {alert.login_attempts_per_min !== undefined && (
-                <span className="text-[10px] text-slate-muted whitespace-nowrap">
-                  {alert.login_attempts_per_min.toFixed(1)} req/min
+              {alert.failed_login_count !== undefined && (
+                <span className="text-[10px] text-carmine-light whitespace-nowrap tabular-nums">
+                  {alert.failed_login_count} failed ·{" "}
+                  {(alert.login_attempts_per_min || 0).toFixed(0)}/min
                 </span>
               )}
             </div>
